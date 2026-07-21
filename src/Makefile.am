@@ -10,7 +10,9 @@ mednafen_LDADD		=
 mednafen_DEPENDENCIES	=
 mednafen_SOURCES 	= 	debug.cpp error.cpp mempatcher.cpp settings.cpp endian.cpp mednafen.cpp git.cpp file.cpp general.cpp memory.cpp netplay.cpp state.cpp state_rewind.cpp movie.cpp player.cpp PSFLoader.cpp SSFLoader.cpp SNSFLoader.cpp SPCReader.cpp tests.cpp testsexp.cpp qtrecord.cpp IPSPatcher.cpp
 mednafen_SOURCES	+=	VirtualFS.cpp NativeVFS.cpp Stream.cpp MemoryStream.cpp ExtMemStream.cpp FileStream.cpp MTStreamReader.cpp
+if WANT_RRDC
 mednafen_SOURCES += control/retro_control.c control/pcfx_control.cpp
+endif
 
 if HAVE_SDL
 SUBDIRS 		+=	drivers

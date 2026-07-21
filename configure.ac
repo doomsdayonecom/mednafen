@@ -259,6 +259,19 @@ if test x$enable_debugger = xyes; then
 		AM_CONDITIONAL(WANT_DEBUGGER, true)
 fi
 
+# Retro Remote Debug Controller (src/control/): opt-in HTTP control backend.
+# Off by default so a plain ./configure builds a stock upstream-parity Mednafen;
+# pass --enable-rrdc (our CI / `make RRDC=1`) to compile the control sources in.
+AM_CONDITIONAL(WANT_RRDC, false)
+AC_ARG_ENABLE(rrdc,
+ AC_HELP_STRING([--enable-rrdc], [build with the Retro Remote Debug Controller backend [[default=no]]]),
+                  , enable_rrdc=no)
+
+if test x$enable_rrdc = xyes; then
+                AC_DEFINE([WANT_RRDC], [1], [Define if we are compiling with the Retro Remote Debug Controller.])
+		AM_CONDITIONAL(WANT_RRDC, true)
+fi
+
 AC_ARG_ENABLE(cjk-fonts,
  AC_HELP_STRING([--enable-cjk-fonts], [build with internal CJK(Chinese, Japanese, Korean) fonts [[default=yes]]]),
                   , enable_cjk_fonts=yes)

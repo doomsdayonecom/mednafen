@@ -39,6 +39,7 @@
 # Autotools-generated (regenerate with ./autogen.sh) — track only the inputs
 # (configure.ac, Makefile.am, m4/, acinclude.m4).
 /configure
+/configure~
 /aclocal.m4
 Makefile.in
 /include/config.h.in

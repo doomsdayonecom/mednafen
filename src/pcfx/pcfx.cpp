@@ -1211,7 +1211,10 @@ MDFN_HIDE extern const MDFNGI EmulatedPCFX =
 /* ---- Retro Remote Debug Controller accessors (src/control/) ------------- *
  * Tiny extern "C" shims so the portable control backend can reach PC-FX
  * state without pulling in Mednafen's C++ headers. RAM/PCFX_V810/PCFX_Power
- * are in namespace MDFN_IEN_PCFX, in scope here via the using-directive above. */
+ * are in namespace MDFN_IEN_PCFX, in scope here via the using-directive above.
+ * Only compiled with --enable-rrdc (WANT_RRDC); nothing references them
+ * otherwise, so leaving them out keeps a stock build warning-clean. */
+#ifdef WANT_RRDC
 extern "C" uint8_t *PCFX_GetRAM(uint32_t *size_out)
 {
     if(size_out) *size_out = 0x200000;   /* 2 MB main RAM */
@@ -1227,3 +1230,4 @@ extern "C" void PCFX_ControlReset(void)
 {
     PCFX_Power();
 }
+#endif /* WANT_RRDC */

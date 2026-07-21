@@ -1,0 +1,50 @@
+-------------------------------------------------------------------------------
+ Retro Remote Debug Controller (RRDC) — Doomsday One fork
+-------------------------------------------------------------------------------
+
+This is a fork of Mednafen that adds the Retro Remote Debug Controller: a small
+HTTP control surface an external harness can drive to inspect and steer the
+running emulator (read memory / CPU registers, grab the displayed framebuffer,
+inject input, reset, etc.). It is the same contract implemented by the sibling
+x16-emulator and neo6502 forks, so one test harness can drive every emulator in
+the toolchain. The shared spec lives at:
+
+	https://github.com/doomsdayonecom/retro-remote-debug-controller
+
+The control backend lives entirely under src/control/ and is dispatched per
+running system, so PC Engine and Saturn support reuse the same core once their
+backends land. Today the PC-FX backend (src/control/pcfx_control.cpp) is the
+reference implementation.
+
+
+ Building with RRDC
+-------------------------------------------------------------------------------
+
+RRDC is OPT-IN. A plain build produces a stock, upstream-parity Mednafen:
+
+	./autogen.sh          # only needed from a fresh git checkout
+	./configure           # RRDC off by default
+	make
+
+To compile the control backend in, pass --enable-rrdc:
+
+	./configure --enable-rrdc
+	make
+
+The flag defines WANT_RRDC (guarding the hooks in src/drivers/main.cpp and the
+accessors in src/pcfx/pcfx.cpp) and adds the src/control/ sources to the build.
+With RRDC off, none of those sources are compiled and the emulator behaves
+exactly as upstream.
+
+At runtime the control server is itself opt-in: it only listens when the
+MEDNAFEN_CONTROLPORT environment variable is set. An --enable-rrdc build with
+MEDNAFEN_CONTROLPORT unset is a no-op.
+
+
+ Build files
+-------------------------------------------------------------------------------
+
+Only autotools *inputs* are tracked (configure.ac, **/Makefile.am, m4/,
+acinclude.m4). The generated files (configure, aclocal.m4, **/Makefile.in,
+include/config.h.in, and the automake aux scripts) are produced by ./autogen.sh
+and are intentionally not committed. Run ./autogen.sh once after cloning.

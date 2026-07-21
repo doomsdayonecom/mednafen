@@ -1277,13 +1277,18 @@ bool DebuggerFudge(void)
 }
 
 // Retro Remote Debug Controller (src/control/): PC-FX HTTP control backend,
-// enabled by MEDNAFEN_CONTROLPORT. Harmless no-op when unset.
+// enabled by MEDNAFEN_CONTROLPORT. Harmless no-op when unset. Compiled in only
+// when configured with --enable-rrdc (WANT_RRDC); otherwise these hooks vanish.
+#ifdef WANT_RRDC
 extern "C" void pcfx_control_init(void);
 extern "C" void pcfx_control_frame(const uint32_t *pixels, int w, int h, int pitch);
+#endif
 
 static int GameLoop(void *arg)
 {
+#ifdef WANT_RRDC
 	pcfx_control_init();
+#endif
 	while(GameThreadRun)
 	{
 	 int16 *sound;
@@ -1383,6 +1388,7 @@ static int GameLoop(void *arg)
 	 else
           MDFNI_Emulate(&espec);
 
+#ifdef WANT_RRDC
 	 // RRDC: push this frame's displayed pixels + service any control request.
 	 if(espec.surface)
 	  pcfx_control_frame((const uint32_t *)espec.surface->pixels
@@ -1390,6 +1396,7 @@ static int GameLoop(void *arg)
 	                       + espec.DisplayRect.x,
 	                     espec.DisplayRect.w, espec.DisplayRect.h,
 	                     espec.surface->pitchinpix);
+#endif
 
 	 if(MDFN_UNLIKELY(StateSLSTest))
 	 {
