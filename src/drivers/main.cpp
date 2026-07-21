@@ -1281,7 +1281,12 @@ bool DebuggerFudge(void)
 // when configured with --enable-rrdc (WANT_RRDC); otherwise these hooks vanish.
 #ifdef WANT_RRDC
 extern "C" void pcfx_control_init(void);
-extern "C" void pcfx_control_frame(const uint32_t *pixels, int w, int h, int pitch);
+extern "C" void pcfx_control_service(void);      // process a request (frame boundary)
+extern "C" int  pcfx_control_running(void);      // 0 => paused/stepped-out: don't advance
+extern "C" void pcfx_control_on_frame(void);     // tick the /step budget
+extern "C" void pcfx_control_frame(const uint32_t *pixels, int w, int h, int pitch, int rsh, int gsh, int bsh);
+extern "C" void pcfx_control_audio(const int16_t *samples, int frames, int channels, double rate);
+extern "C" void PCFX_ApplyInjectedButtons(void); // re-assert /key holds (pcfx/input.cpp)
 #endif
 
 static int GameLoop(void *arg)
@@ -1308,6 +1313,22 @@ static int GameLoop(void *arg)
 
 	 if(Sound_NeedReInit())
 	  GT_ReinitSound();
+
+#ifdef WANT_RRDC
+	 // RRDC: service one control request at this frame boundary (runs even when
+	 // paused, so /resume and /step get through), then gate advancing the
+	 // machine. When paused with no steps left, idle without emulating.
+	 pcfx_control_service();
+	 if(!pcfx_control_running())
+	 {
+	  Time::SleepMS(2);
+	  continue;
+	 }
+	 // Re-assert any /key-held pad buttons: Input_Update() rewrote the pad from
+	 // physical input after the previous frame, so OR them back in before the
+	 // core reads the pad in MDFNI_Emulate().
+	 PCFX_ApplyInjectedButtons();
+#endif
 
 	 if(MDFNDnetplay && !(NoWaiting & 0x2))	// TODO: Hacky, clean up.
 	  ers.SetETtoRT();
@@ -1395,7 +1416,10 @@ static int GameLoop(void *arg)
 	                       + espec.DisplayRect.y * espec.surface->pitchinpix
 	                       + espec.DisplayRect.x,
 	                     espec.DisplayRect.w, espec.DisplayRect.h,
-	                     espec.surface->pitchinpix);
+	                     espec.surface->pitchinpix,
+	                     espec.surface->format.Rshift,
+	                     espec.surface->format.Gshift,
+	                     espec.surface->format.Bshift);
 #endif
 
 	 if(MDFN_UNLIKELY(StateSLSTest))
@@ -1428,6 +1452,13 @@ static int GameLoop(void *arg)
 	 sound = espec.SoundBuf + (espec.SoundBufSize_DriverProcessed * CurGame->soundchan);
 	 ssize = espec.SoundBufSize - espec.SoundBufSize_DriverProcessed;
 	 mcycs = (espec.MasterCycles - espec.MasterCycles_DriverProcessed) / CurGameSpeed;
+
+#ifdef WANT_RRDC
+	 // RRDC: this emulated frame is complete — push its audio into the drain
+	 // ring and tick the /step budget (waking a blocked /step at zero).
+	 pcfx_control_audio(sound, ssize, CurGame->soundchan, espec.SoundRate);
+	 pcfx_control_on_frame();
+#endif
 	 //
 	 //
 	 //

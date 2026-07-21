@@ -218,6 +218,38 @@ void FXINPUT_SetInput(unsigned port, const char *type, uint8 *ptr)
  RemakeDevices(port);
 }
 
+#ifdef WANT_RRDC
+/* ---- Retro Remote Debug Controller: pad-button injection ---------------- *
+ * data_ptr[0] is port 0's 2-byte pad buffer (little-endian; bit table in
+ * input/gamepad.cpp: UP=0 DOWN=1 LEFT=2 RIGHT=3 SELECT=4 RUN=5 IV=6 V=7 VI=8
+ * III=9 II=10 I=11). The frontend's Input_Update() rewrites that buffer from
+ * physical input every frame, so injected buttons are kept in a persistent
+ * mask that PCFX_ApplyInjectedButtons() OR-merges back in each frame, right
+ * before the core reads the pad. Both run on the emulator thread. */
+static uint16 rrdc_inject_mask = 0;   /* buttons currently held via /key       */
+static uint16 rrdc_inject_tap  = 0;   /* subset to auto-release after one frame */
+
+extern "C" int PCFX_InjectButton(unsigned bit, int action)   /* 0=tap 1=down 2=up */
+{
+ if(bit > 15) return 0;               /* only 16 pad bits exist                 */
+ const uint16 m = (uint16)(1u << bit);
+ if(action == 2)      rrdc_inject_mask &= ~m;                 /* release          */
+ else {               rrdc_inject_mask |=  m;                 /* press (down/tap) */
+  if(action == 0)     rrdc_inject_tap  |=  m;                 /* tap: 1-frame     */
+ }
+ return 1;
+}
+
+extern "C" void PCFX_ApplyInjectedButtons(void)
+{
+ uint8 *p = (uint8 *)data_ptr[0];
+ if(p) { p[0] |= (uint8)(rrdc_inject_mask & 0xFF);
+         p[1] |= (uint8)(rrdc_inject_mask >> 8); }
+ rrdc_inject_mask &= ~rrdc_inject_tap;   /* a tap lives one applied frame */
+ rrdc_inject_tap = 0;
+}
+#endif /* WANT_RRDC */
+
 uint8 FXINPUT_Read8(uint32 A, const v810_timestamp_t timestamp)
 {
  //printf("Read8: %04x\n", A);
