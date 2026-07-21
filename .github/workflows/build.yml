@@ -90,7 +90,11 @@ jobs:
               make -j"$(nproc)"
               echo "::endgroup::"
               test -x src/mednafen
-              nm src/mednafen | grep -q retro_control_start \
+              # Write nm output to a file before grepping: `nm | grep -q` under
+              # `set -o pipefail` fails on a *match* (grep short-circuits, nm
+              # gets SIGPIPE) — a false negative even when the symbol is present.
+              nm src/mednafen > /tmp/syms-rrdc.txt || true
+              grep -q retro_control_start /tmp/syms-rrdc.txt \
                 || { echo "RRDC build is missing retro_control_start"; exit 1; }
               install -Dm755 src/mednafen /work/mednafen-rrdc
               strip /work/mednafen-rrdc || true
@@ -101,7 +105,8 @@ jobs:
               make -j"$(nproc)"
               echo "::endgroup::"
               test -x src/mednafen
-              if nm src/mednafen | grep -q retro_control_start; then
+              nm src/mednafen > /tmp/syms-stock.txt || true
+              if grep -q retro_control_start /tmp/syms-stock.txt; then
                 echo "stock build unexpectedly contains RRDC symbols"; exit 1
               fi
               echo "OK: --enable-rrdc links RRDC; stock build has none."
