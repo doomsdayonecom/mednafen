@@ -1,0 +1,185 @@
+# Build-verify the fork in the toolchain container: compile BOTH the
+# RRDC-enabled emulator (--enable-rrdc) and a stock, upstream-parity build
+# (--disable-rrdc), assert the RRDC symbols are present / absent respectively,
+# publish the RRDC binary as an artifact, and ping Discord.
+#
+# NOTE: the RRDC *conformance* suite (shared repo `conformance/`) is not run
+# here — a PC-FX needs a copyrighted BIOS + a bootable disc to reach a running
+# state, and neither can be shipped in CI. Conformance is verified locally and
+# by the shared repo's own CI (against x16emu, which boots a zero dummy ROM).
+# This job's job is to catch build breakage on the fork.
+
+name: 🎮 Build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 🔨 Build (RRDC + stock)
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: read     # pull the prebuilt toolchain image from GHCR
+
+    steps:
+      - name: 📦 Checkout source (with the RRDC submodule)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: 🔑 Log in to ghcr.io
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pull the toolchain image published by docker.yml so the apt toolchain is
+      # provisioned once (on a Dockerfile change), not on every push. Falls back
+      # to an inline build only when nothing's published yet (the bootstrap
+      # push, before docker.yml has run on main).
+      - name: 🐳 Toolchain image (pull published, else build)
+        id: image
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}-builder:latest"
+          if docker pull "$IMAGE" 2>/dev/null; then
+            docker tag "$IMAGE" mednafen-builder:ci
+            echo "build=0" >> "$GITHUB_OUTPUT"
+            echo "::notice::Using published toolchain image $IMAGE"
+          else
+            echo "build=1" >> "$GITHUB_OUTPUT"
+            echo "::notice::No published toolchain image yet — building inline (one-off)."
+          fi
+
+      - name: 🐳 Set up Docker Buildx
+        if: steps.image.outputs.build == '1'
+        uses: docker/setup-buildx-action@v4
+
+      - name: 🔨 Build toolchain image (fallback)
+        if: steps.image.outputs.build == '1'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: mednafen-builder:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 🎮 Build --enable-rrdc + stock, verify symbols
+        run: |
+          docker run --rm \
+            -v "${PWD}:/work" -w /work \
+            --user "$(id -u):$(id -g)" \
+            mednafen-builder:ci \
+            bash -euo pipefail -c '
+              echo "::group::autogen"; ./autogen.sh; echo "::endgroup::"
+              echo "::group::configure --enable-rrdc + make"
+              ./configure --enable-rrdc
+              make -j"$(nproc)"
+              echo "::endgroup::"
+              test -x src/mednafen
+              nm src/mednafen | grep -q retro_control_start \
+                || { echo "RRDC build is missing retro_control_start"; exit 1; }
+              install -Dm755 src/mednafen /work/mednafen-rrdc
+              strip /work/mednafen-rrdc || true
+
+              echo "::group::configure --disable-rrdc (stock) + make"
+              make distclean
+              ./configure --disable-rrdc
+              make -j"$(nproc)"
+              echo "::endgroup::"
+              test -x src/mednafen
+              if nm src/mednafen | grep -q retro_control_start; then
+                echo "stock build unexpectedly contains RRDC symbols"; exit 1
+              fi
+              echo "OK: --enable-rrdc links RRDC; stock build has none."
+            '
+
+      - name: 📐 Report binary size
+        run: |
+          size=$(stat -c %s mednafen-rrdc)
+          {
+            echo "## 🎮 Mednafen RRDC build"
+            echo ""
+            echo "| File | Bytes |"
+            echo "|---|---:|"
+            printf "| \`mednafen-rrdc\` (stripped) | %s |\n" "${size}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 📤 Upload RRDC emulator
+        uses: actions/upload-artifact@v7
+        with:
+          name: mednafen-rrdc
+          path: mednafen-rrdc
+          if-no-files-found: error
+          retention-days: 14
+
+      # --- Discord notifications -----------------------------------------
+      # Success on main only; failure anywhere. Secret: DISCORD_WEBHOOK_URL.
+      - name: 💬 Notify Discord — build OK (main)
+        if: success() && github.ref == 'refs/heads/main'
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+        run: |
+          [ -z "$WEBHOOK" ] && { echo "no webhook secret — skipping"; exit 0; }
+          SIZE=$(stat -c %s mednafen-rrdc)
+          KB=$(( (SIZE + 1023) / 1024 ))
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          jq -nc \
+            --arg run_url    "$RUN_URL" \
+            --arg commit_url "$COMMIT_URL" \
+            --arg sha        "$SHORT_SHA" \
+            --arg actor      "${GITHUB_ACTOR}" \
+            --arg size       "${SIZE} bytes (${KB} KB, stripped)" \
+            '{embeds:[{
+               title: "✅ Mednafen build OK on `main`",
+               url: $run_url,
+               color: 3066993,
+               fields: [
+                 {name:"Commit",     value:("[`" + $sha + "`](" + $commit_url + ")"), inline:true},
+                 {name:"Author",     value:$actor, inline:true},
+                 {name:"RRDC binary", value:$size, inline:false}
+               ]
+             }]}' \
+          | curl -fsS -X POST -H "Content-Type: application/json" -d @- "$WEBHOOK"
+
+      - name: 💬 Notify Discord — build FAILED
+        if: failure()
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+        run: |
+          [ -z "$WEBHOOK" ] && { echo "no webhook secret — skipping"; exit 0; }
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          jq -nc \
+            --arg run_url    "$RUN_URL" \
+            --arg commit_url "$COMMIT_URL" \
+            --arg sha        "$SHORT_SHA" \
+            --arg actor      "${GITHUB_ACTOR}" \
+            --arg branch     "${GITHUB_REF_NAME}" \
+            '{embeds:[{
+               title: "❌ Mednafen build FAILED",
+               url: $run_url,
+               color: 15158332,
+               fields: [
+                 {name:"Branch", value:("`" + $branch + "`"), inline:true},
+                 {name:"Commit", value:("[`" + $sha + "`](" + $commit_url + ")"), inline:true},
+                 {name:"Author", value:$actor, inline:true}
+               ]
+             }]}' \
+          | curl -fsS -X POST -H "Content-Type: application/json" -d @- "$WEBHOOK"

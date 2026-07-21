@@ -1,0 +1,32 @@
+# Mirror the repo to Codeberg (geopolitical-hedge backup), same setup as the
+# sibling ports: GitHub stays canonical for issues/PRs; Codeberg holds the git
+# state. Auth is a dedicated SSH deploy key in secrets.CODEBERG_SSH_KEY, against
+# the live codeberg.org/doomsdayonecom/mednafen repo.
+
+name: 🪞 Mirror to Codeberg
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["**"]
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-codeberg-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mirror-code:
+    name: Mirror code repo
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📦 Checkout (full history + all refs)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 🪞 Push to Codeberg
+        uses: pixta-dev/repository-mirroring-action@v1
+        with:
+          target_repo_url: ssh://git@codeberg.org/doomsdayonecom/mednafen.git
+          ssh_private_key: ${{ secrets.CODEBERG_SSH_KEY }}

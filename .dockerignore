@@ -1,0 +1,15 @@
+# Keep the build context small and free of stale artifacts — autogen.sh
+# regenerates the build system inside the image, and make rebuilds from source.
+.git/
+**/*.o
+**/*.a
+**/*.lo
+**/*.la
+**/.deps/
+**/.dirstamp
+**/.libs/
+src/mednafen
+autom4te.cache/
+config.log
+config.status
+config.cache
