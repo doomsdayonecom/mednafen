@@ -13,3 +13,13 @@ autom4te.cache/
 config.log
 config.status
 config.cache
+# Generated autotools output — regenerated inside the image by autogen.sh.
+# Excluding them keeps the local build context identical to a clean CI checkout
+# (a stale aclocal.m4 in the context was masking an autogen.sh ordering bug).
+# NB: intl/Makefile.in is a tracked gettext input (not generated) — keep it, so
+# these are anchored to the root and never match it.
+/aclocal.m4
+/configure
+/configure~
+/include/config.h.in
+/include/config.h
