@@ -1284,7 +1284,7 @@ extern "C" void pcfx_control_init(void);
 extern "C" void pcfx_control_service(void);      // process a request (frame boundary)
 extern "C" int  pcfx_control_running(void);      // 0 => paused/stepped-out: don't advance
 extern "C" void pcfx_control_on_frame(void);     // tick the /step budget
-extern "C" void pcfx_control_frame(const uint32_t *pixels, int w, int h, int pitch, int rsh, int gsh, int bsh);
+extern "C" void pcfx_control_frame(const uint32_t *pixels, int w, int h, int pitch, const int32_t *line_widths, int rsh, int gsh, int bsh);
 extern "C" void pcfx_control_audio(const int16_t *samples, int frames, int channels, double rate);
 extern "C" void PCFX_ApplyInjectedButtons(void); // re-assert /key holds (pcfx/input.cpp)
 #endif
@@ -1412,14 +1412,21 @@ static int GameLoop(void *arg)
 #ifdef WANT_RRDC
 	 // RRDC: push this frame's displayed pixels + service any control request.
 	 if(espec.surface)
+	 {
+	  // Per-line widths (PC-FX varies horizontal res per scene). NULL when the
+	  // core signals a uniform width via LineWidths[0] == ~0.
+	  const int32 *lw = (espec.LineWidths && espec.LineWidths[0] != (int32)~0)
+	                     ? espec.LineWidths + espec.DisplayRect.y : NULL;
 	  pcfx_control_frame((const uint32_t *)espec.surface->pixels
 	                       + espec.DisplayRect.y * espec.surface->pitchinpix
 	                       + espec.DisplayRect.x,
 	                     espec.DisplayRect.w, espec.DisplayRect.h,
 	                     espec.surface->pitchinpix,
+	                     (const int32_t *)lw,
 	                     espec.surface->format.Rshift,
 	                     espec.surface->format.Gshift,
 	                     espec.surface->format.Bshift);
+	 }
 #endif
 
 	 if(MDFN_UNLIKELY(StateSLSTest))

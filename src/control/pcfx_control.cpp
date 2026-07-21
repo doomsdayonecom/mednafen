@@ -26,8 +26,15 @@ extern "C" int      PCFX_InjectButton(unsigned bit, int action);  /* 0=tap 1=dn 
 /* --- captured framebuffer (filled by the frontend hook each frame) ------- *
  * Stored pre-converted to packed RGB888 so /screenshot is correct regardless
  * of Mednafen's (display-dependent) surface channel order — the frame hook
- * decodes each pixel with the surface's R/G/B shifts. */
-#define FB_MAX_W 512
+ * decodes each pixel with the surface's R/G/B shifts.
+ *
+ * The PC-FX changes horizontal resolution per scene, and Mednafen reports the
+ * TRUE per-line width in espec.LineWidths[] (256 for the maze, up to 1024 for
+ * high-res text like the attract screen) — which can disagree with
+ * DisplayRect.w. So the hook normalizes every line to a common width using the
+ * per-line widths, exactly as Mednafen's own blitter does. FB_MAX_W must cover
+ * the widest mode (1024) or the image is clipped. */
+#define FB_MAX_W 1024
 #define FB_MAX_H 256
 static uint8_t  g_fb[FB_MAX_W * FB_MAX_H * 3];
 static int      g_fb_w = 0, g_fb_h = 0;
@@ -183,25 +190,40 @@ extern "C" void pcfx_control_on_frame(void) { retro_control_on_frame(); }
 
 /* Copy this frame's displayed pixels, decoding each 32-bit surface pixel to
  * packed RGB888 with the surface's channel shifts (rsh/gsh/bsh = bit position
- * of each component's low bit; 8-bit precision). Called once per emulated
- * frame. (Servicing happens at the top of the loop.) */
+ * of each component's low bit; 8-bit precision). Called once per emulated frame.
+ *
+ * `line_widths[y]` is the TRUE pixel width of display line y (NULL => uniform,
+ * use `w` = DisplayRect.w). The PC-FX varies horizontal resolution per scene
+ * and DisplayRect.w can disagree with the real per-line width, so each line is
+ * nearest-neighbour stretched from its own width to the frame's widest line —
+ * the same normalization Mednafen's blitter applies before display. Without
+ * this a high-res (1024) attract screen was captured as a clipped 256/512 slice
+ * shifted off-centre. (Servicing happens at the top of the loop.) */
 extern "C" void pcfx_control_frame(const uint32_t *pixels, int w, int h, int pitch,
-                                   int rsh, int gsh, int bsh)
+                                   const int32_t *line_widths, int rsh, int gsh, int bsh)
 {
     if (pixels && w > 0 && h > 0) {
-        if (w > FB_MAX_W) w = FB_MAX_W;
         if (h > FB_MAX_H) h = FB_MAX_H;
+        /* output width = widest true line width this frame, capped to the buffer */
+        int W = w;
         for (int y = 0; y < h; y++) {
-            const uint32_t *row = &pixels[y * pitch];
-            uint8_t *o = &g_fb[(size_t)y * w * 3];
-            for (int x = 0; x < w; x++) {
-                uint32_t px = row[x];
+            int lw = line_widths ? (int)line_widths[y] : w;
+            if (lw > W) W = lw;
+        }
+        if (W > FB_MAX_W) W = FB_MAX_W;
+        for (int y = 0; y < h; y++) {
+            int lw = line_widths ? (int)line_widths[y] : w;
+            if (lw <= 0) lw = w;                       /* blank/border line */
+            const uint32_t *row = &pixels[(size_t)y * pitch];
+            uint8_t *o = &g_fb[(size_t)y * W * 3];
+            for (int x = 0; x < W; x++) {
+                uint32_t px = row[(size_t)x * lw / W]; /* stretch lw -> W */
                 *o++ = (uint8_t)(px >> rsh);
                 *o++ = (uint8_t)(px >> gsh);
                 *o++ = (uint8_t)(px >> bsh);
             }
         }
-        g_fb_w = w;
+        g_fb_w = W;
         g_fb_h = h;
     }
     g_frames++;
