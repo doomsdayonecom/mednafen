@@ -101,24 +101,27 @@ static void pcfx_reset(void) { PCFX_ControlReset(); }
 
 /* 0.2: inject a pad button. The PC-FX has a gamepad, not a keyboard, so both a
  * character (is_text=1) and a raw code (is_text=0) are interpreted as a
- * character over a WASD-style pad map, then routed to the pad bit (see
- * pcfx/input.cpp: UP=0 DOWN=1 LEFT=2 RIGHT=3 SELECT=4 RUN=5 IV=6 V=7 VI=8
- * III=9 II=10 I=11). Unmapped characters return 0 (the server answers 400). */
+ * character over a WASD-style pad map, then routed to the pad bit. The bit
+ * numbers are the FX pad's own layout as the guest reads it (eris_pad_read /
+ * liberis): I=0 II=1 III=2 IV=3 V=4 VI=5 SELECT=6 RUN=7 UP=8 RIGHT=9 DOWN=10
+ * LEFT=11. (An earlier map used a fabricated layout with SELECT=4, so /key hit
+ * the wrong buttons — verified: text=c now lands SELECT/coin.) Unmapped chars
+ * return -1 (the server answers 400). */
 static int pcfx_char_to_bit(uint32_t c)
 {
     switch (c) {
-    case 'w': case 'W': return 0;    /* UP     */
-    case 's': case 'S': return 1;    /* DOWN   */
-    case 'a': case 'A': return 2;    /* LEFT   */
-    case 'd': case 'D': return 3;    /* RIGHT  */
-    case 'c': case 'C': return 4;    /* SELECT (coin)  */
-    case ' ': case '\r': case '\n': return 5;  /* RUN (start) */
-    case '1': return 11;             /* I   */
-    case '2': return 10;             /* II  */
-    case '3': return 9;              /* III */
-    case '4': return 6;              /* IV  */
-    case '5': return 7;              /* V   */
-    case '6': return 8;              /* VI  */
+    case 'w': case 'W': return 8;    /* UP     */
+    case 's': case 'S': return 10;   /* DOWN   */
+    case 'a': case 'A': return 11;   /* LEFT   */
+    case 'd': case 'D': return 9;    /* RIGHT  */
+    case 'c': case 'C': return 6;    /* SELECT (coin)  */
+    case ' ': case '\r': case '\n': return 7;  /* RUN (start) */
+    case '1': return 0;              /* I   */
+    case '2': return 1;              /* II  */
+    case '3': return 2;              /* III */
+    case '4': return 3;              /* IV  */
+    case '5': return 4;              /* V   */
+    case '6': return 5;              /* VI  */
     default:  return -1;
     }
 }
