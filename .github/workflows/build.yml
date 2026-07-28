@@ -25,7 +25,8 @@ concurrency:
 jobs:
   build:
     name: 🔨 Build (RRDC + stock)
-    runs-on: ubuntu-latest
+    # runs-on: ubuntu-latest   # GitHub-hosted — restore when org Actions minutes return
+    runs-on: [self-hosted, doomsdayonecom]   # org self-hosted runners (GH-hosted minutes exhausted)
 
     permissions:
       contents: read
