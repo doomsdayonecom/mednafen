@@ -22,6 +22,9 @@ extern "C" void     PCFX_GetRegs(uint32_t *out33);     /* [0]=pc, [1..32]=r0..r3
 extern "C" void     PCFX_ControlReset(void);           /* MDFNI_Reset() */
 /* --- pad-button injection, implemented in pcfx/input.cpp ----------------- */
 extern "C" int      PCFX_InjectButton(unsigned bit, int action);  /* 0=tap 1=dn 2=up */
+/* --- level-held virtual pad (0.5), implemented in pcfx/input.cpp --------- */
+extern "C" int      PCFX_SetPad(int index, unsigned buttons, int connected);
+extern "C" int      PCFX_GetPad(int index, unsigned *buttons, int *connected);
 
 /* --- captured framebuffer (filled by the frontend hook each frame) ------- *
  * Stored pre-converted to packed RGB888 so /screenshot is correct regardless
@@ -102,26 +105,27 @@ static void pcfx_reset(void) { PCFX_ControlReset(); }
 /* 0.2: inject a pad button. The PC-FX has a gamepad, not a keyboard, so both a
  * character (is_text=1) and a raw code (is_text=0) are interpreted as a
  * character over a WASD-style pad map, then routed to the pad bit. The bit
- * numbers are the FX pad's own layout as the guest reads it (eris_pad_read /
- * liberis): I=0 II=1 III=2 IV=3 V=4 VI=5 SELECT=6 RUN=7 UP=8 RIGHT=9 DOWN=10
- * LEFT=11. (An earlier map used a fabricated layout with SELECT=4, so /key hit
- * the wrong buttons — verified: text=c now lands SELECT/coin.) Unmapped chars
- * return -1 (the server answers 400). */
+ * numbers are the PC-FX pad's data-buffer layout — the BitOffsets declared in
+ * pcfx/input/gamepad.cpp (PCFX_GamepadIDII) and read back verbatim by the
+ * device (Frame() does buttons = de16lsb(data); Read() returns it): UP=0 DOWN=1
+ * LEFT=2 RIGHT=3 SELECT=4 RUN=5 IV=6 V=7 VI=8 III=9 II=10 I=11. (An earlier map
+ * here used I=0…SELECT=6, which set the wrong bits — 'c' hit IV, not SELECT.)
+ * Unmapped chars return -1 (the server answers 400). */
 static int pcfx_char_to_bit(uint32_t c)
 {
     switch (c) {
-    case 'w': case 'W': return 8;    /* UP     */
-    case 's': case 'S': return 10;   /* DOWN   */
-    case 'a': case 'A': return 11;   /* LEFT   */
-    case 'd': case 'D': return 9;    /* RIGHT  */
-    case 'c': case 'C': return 6;    /* SELECT (coin)  */
-    case ' ': case '\r': case '\n': return 7;  /* RUN (start) */
-    case '1': return 0;              /* I   */
-    case '2': return 1;              /* II  */
-    case '3': return 2;              /* III */
-    case '4': return 3;              /* IV  */
-    case '5': return 4;              /* V   */
-    case '6': return 5;              /* VI  */
+    case 'w': case 'W': return 0;    /* UP     */
+    case 's': case 'S': return 1;    /* DOWN   */
+    case 'a': case 'A': return 2;    /* LEFT   */
+    case 'd': case 'D': return 3;    /* RIGHT  */
+    case 'c': case 'C': return 4;    /* SELECT (coin)  */
+    case ' ': case '\r': case '\n': return 5;  /* RUN (start) */
+    case '1': return 11;             /* I   */
+    case '2': return 10;             /* II  */
+    case '3': return 9;              /* III */
+    case '4': return 6;              /* IV  */
+    case '5': return 7;              /* V   */
+    case '6': return 8;              /* VI  */
     default:  return -1;
     }
 }
@@ -151,6 +155,79 @@ static uint32_t pcfx_capture_audio(int16_t *out, uint32_t cap,
     return n;
 }
 
+/* 0.5: virtual game controller. RRDC speaks a fixed CANONICAL button mask
+ * (bit0 LEFT 1 RIGHT 2 UP 3 DOWN 4 A 5 B 6 X 7 Y 8 START 9 SELECT 10 L 11 R —
+ * the SNES/Neo6502 order, identical on every platform) so one /pad call means
+ * the same thing everywhere. We remap it to the PC-FX pad's own data-buffer
+ * bits (see pcfx_char_to_bit): the d-pad maps straight across; A/B → the
+ * primary pair I/II; X/Y → III/IV; L/R → V/VI; START → RUN; SELECT → SELECT.
+ * pcfx/input.cpp holds the remapped mask as a LEVEL and OR-merges it into the
+ * pad read every frame — the real read path, no SDL (headless CI has no
+ * joystick, which is the case this exists for). */
+static const int8_t pcfx_pad_from_canon[12] = {
+    /*[0]  LEFT  */  2,
+    /*[1]  RIGHT */  3,
+    /*[2]  UP    */  0,
+    /*[3]  DOWN  */  1,
+    /*[4]  A     */ 11,   /* I   */
+    /*[5]  B     */ 10,   /* II  */
+    /*[6]  X     */  9,   /* III */
+    /*[7]  Y     */  6,   /* IV  */
+    /*[8]  START */  5,   /* RUN */
+    /*[9]  SELECT*/  4,   /* SELECT */
+    /*[10] L     */  7,   /* V   */
+    /*[11] R     */  8,   /* VI  */
+};
+
+static unsigned pcfx_mask_from_canon(int canon)
+{
+    unsigned out = 0;
+    for (int b = 0; b < 12; b++)
+        if (canon & (1 << b)) out |= (1u << pcfx_pad_from_canon[b]);
+    return out;
+}
+
+static int pcfx_canon_from_mask(unsigned raw)
+{
+    int out = 0;
+    for (int b = 0; b < 12; b++)
+        if (raw & (1u << pcfx_pad_from_canon[b])) out |= (1 << b);
+    return out;
+}
+
+static int pcfx_set_pad(int index, int buttons, int connected)
+{
+    unsigned cur = 0; int curconn = 0;
+    if (!PCFX_GetPad(index, &cur, &curconn)) return 0;   /* bad index -> 400 */
+    unsigned mask = (buttons   < 0) ? cur     : pcfx_mask_from_canon(buttons);
+    int      conn = (connected < 0) ? curconn : connected;   /* -1 = leave as-is */
+    return PCFX_SetPad(index, mask, conn);
+}
+
+static int pcfx_get_pad(int index, int *buttons, int *connected)
+{
+    unsigned raw = 0; int conn = 0;
+    if (!PCFX_GetPad(index, &raw, &conn)) return 0;
+    if (buttons)   *buttons   = pcfx_canon_from_mask(raw);
+    if (connected) *connected = conn;
+    return 1;
+}
+
+/* The PC-FX is a gamepad console with no built-in pointer, but 0.5.0 advertises
+ * CUMULATIVELY (it requires the 0.4.0 pointer verbs to be present). Honest
+ * no-pointer stubs let /status report 0.5.0 while /pointer answers 400. */
+static int pcfx_set_pointer(int absolute, int32_t x, int32_t y, int buttons)
+{
+    (void)absolute; (void)x; (void)y; (void)buttons;
+    return 0;   /* no pointing device -> 400 */
+}
+
+static int pcfx_get_pointer(int32_t *x, int32_t *y, int *buttons)
+{
+    (void)x; (void)y; (void)buttons;
+    return 0;   /* no pointing device -> 400 */
+}
+
 static const retro_control_backend_t pcfx_backend = {
     /*platform*/       "pcfx",
     /*emulator*/       "mednafen",
@@ -162,6 +239,10 @@ static const retro_control_backend_t pcfx_backend = {
     /*reset*/          pcfx_reset,
     /*write_mem*/      pcfx_write_mem,
     /*capture_audio*/  pcfx_capture_audio,
+    /*set_pointer*/    pcfx_set_pointer,
+    /*get_pointer*/    pcfx_get_pointer,
+    /*set_pad*/        pcfx_set_pad,
+    /*get_pad*/        pcfx_get_pad,
 };
 
 /* --- frontend hooks (called from src/drivers/main.cpp) ------------------- *

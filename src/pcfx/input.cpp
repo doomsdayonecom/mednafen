@@ -240,13 +240,46 @@ extern "C" int PCFX_InjectButton(unsigned bit, int action)   /* 0=tap 1=down 2=u
  return 1;
 }
 
+/* 0.5: level-held virtual pad (RRDC /pad). Unlike the momentary /key inject
+ * above, a pad mask persists until changed and is OR-merged every frame for a
+ * connected pad — per port, so multi-pad tests work. Bits are the PC-FX buffer
+ * layout (UP=0 DOWN=1 LEFT=2 RIGHT=3 SELECT=4 RUN=5 IV=6 V=7 VI=8 III=9 II=10
+ * I=11); pcfx_control.cpp remaps the RRDC canonical mask onto it. */
+static uint16 rrdc_pad_mask[TOTAL_PORTS]      = { 0 };
+static uint8  rrdc_pad_connected[TOTAL_PORTS] = { 0 };
+
+extern "C" int PCFX_SetPad(int index, unsigned buttons, int connected)
+{
+ if(index < 0 || index >= TOTAL_PORTS) return 0;
+ rrdc_pad_mask[index]      = (uint16)buttons;
+ rrdc_pad_connected[index] = connected ? 1 : 0;
+ return 1;
+}
+
+extern "C" int PCFX_GetPad(int index, unsigned *buttons, int *connected)
+{
+ if(index < 0 || index >= TOTAL_PORTS) return 0;
+ if(buttons)   *buttons   = rrdc_pad_mask[index];
+ if(connected) *connected = rrdc_pad_connected[index];
+ return 1;
+}
+
 extern "C" void PCFX_ApplyInjectedButtons(void)
 {
+ /* /key momentary inject (port 0) */
  uint8 *p = (uint8 *)data_ptr[0];
  if(p) { p[0] |= (uint8)(rrdc_inject_mask & 0xFF);
          p[1] |= (uint8)(rrdc_inject_mask >> 8); }
  rrdc_inject_mask &= ~rrdc_inject_tap;   /* a tap lives one applied frame */
  rrdc_inject_tap = 0;
+
+ /* 0.5: level-held /pad inject, per connected port */
+ for(int i = 0; i < TOTAL_PORTS; i++) {
+  if(!rrdc_pad_connected[i]) continue;
+  uint8 *pp = (uint8 *)data_ptr[i];
+  if(pp) { pp[0] |= (uint8)(rrdc_pad_mask[i] & 0xFF);
+           pp[1] |= (uint8)(rrdc_pad_mask[i] >> 8); }
+ }
 }
 #endif /* WANT_RRDC */
 
