@@ -104,28 +104,38 @@ static void pcfx_reset(void) { PCFX_ControlReset(); }
 
 /* 0.2: inject a pad button. The PC-FX has a gamepad, not a keyboard, so both a
  * character (is_text=1) and a raw code (is_text=0) are interpreted as a
- * character over a WASD-style pad map, then routed to the pad bit. The bit
- * numbers are the PC-FX pad's data-buffer layout — the BitOffsets declared in
- * pcfx/input/gamepad.cpp (PCFX_GamepadIDII) and read back verbatim by the
- * device (Frame() does buttons = de16lsb(data); Read() returns it): UP=0 DOWN=1
- * LEFT=2 RIGHT=3 SELECT=4 RUN=5 IV=6 V=7 VI=8 III=9 II=10 I=11. (An earlier map
- * here used I=0…SELECT=6, which set the wrong bits — 'c' hit IV, not SELECT.)
+ * character over a WASD-style pad map, then routed to the pad bit.
+ *
+ * The bit numbers are the PC-FX pad word as the guest reads it:
+ *   I=0 II=1 III=2 IV=3 V=4 VI=5 SELECT=6 RUN=7 UP=8 RIGHT=9 DOWN=10 LEFT=11
+ * We inject by OR-ing into data_ptr[], the same buffer the device's Frame()
+ * consumes verbatim (buttons = de16lsb(data); Read() returns it), so these ARE
+ * the guest-visible bits — the same ones liberis' fxpad/spr7up examples decode
+ * on real hardware and the same ones pac-man-fx's PAD_* constants use.
+ *
+ * TRAP: this layout is implicit in the ORDER of PCFX_GamepadIDII in
+ * pcfx/input/gamepad.cpp — git.cpp walks that array assigning
+ * BitOffset += BitSize. The third IDIIS_Button argument is ConfigOrder (the
+ * input-config prompt order), NOT a bit offset. Reading those numbers as bits
+ * gives the wrong map (UP=0 DOWN=1 … SELECT=4), which silently sends 'c' to V
+ * instead of SELECT so no credit is ever deposited. Do not "fix" this back.
+ *
  * Unmapped chars return -1 (the server answers 400). */
 static int pcfx_char_to_bit(uint32_t c)
 {
     switch (c) {
-    case 'w': case 'W': return 0;    /* UP     */
-    case 's': case 'S': return 1;    /* DOWN   */
-    case 'a': case 'A': return 2;    /* LEFT   */
-    case 'd': case 'D': return 3;    /* RIGHT  */
-    case 'c': case 'C': return 4;    /* SELECT (coin)  */
-    case ' ': case '\r': case '\n': return 5;  /* RUN (start) */
-    case '1': return 11;             /* I   */
-    case '2': return 10;             /* II  */
-    case '3': return 9;              /* III */
-    case '4': return 6;              /* IV  */
-    case '5': return 7;              /* V   */
-    case '6': return 8;              /* VI  */
+    case 'w': case 'W': return 8;    /* UP     */
+    case 's': case 'S': return 10;   /* DOWN   */
+    case 'a': case 'A': return 11;   /* LEFT   */
+    case 'd': case 'D': return 9;    /* RIGHT  */
+    case 'c': case 'C': return 6;    /* SELECT (coin)  */
+    case ' ': case '\r': case '\n': return 7;  /* RUN (start) */
+    case '1': return 0;              /* I   */
+    case '2': return 1;              /* II  */
+    case '3': return 2;              /* III */
+    case '4': return 3;              /* IV  */
+    case '5': return 4;              /* V   */
+    case '6': return 5;              /* VI  */
     default:  return -1;
     }
 }
@@ -165,18 +175,18 @@ static uint32_t pcfx_capture_audio(int16_t *out, uint32_t cap,
  * pad read every frame — the real read path, no SDL (headless CI has no
  * joystick, which is the case this exists for). */
 static const int8_t pcfx_pad_from_canon[12] = {
-    /*[0]  LEFT  */  2,
-    /*[1]  RIGHT */  3,
-    /*[2]  UP    */  0,
-    /*[3]  DOWN  */  1,
-    /*[4]  A     */ 11,   /* I   */
-    /*[5]  B     */ 10,   /* II  */
-    /*[6]  X     */  9,   /* III */
-    /*[7]  Y     */  6,   /* IV  */
-    /*[8]  START */  5,   /* RUN */
-    /*[9]  SELECT*/  4,   /* SELECT */
-    /*[10] L     */  7,   /* V   */
-    /*[11] R     */  8,   /* VI  */
+    /*[0]  LEFT  */ 11,
+    /*[1]  RIGHT */  9,
+    /*[2]  UP    */  8,
+    /*[3]  DOWN  */ 10,
+    /*[4]  A     */  0,   /* I   */
+    /*[5]  B     */  1,   /* II  */
+    /*[6]  X     */  2,   /* III */
+    /*[7]  Y     */  3,   /* IV  */
+    /*[8]  START */  7,   /* RUN */
+    /*[9]  SELECT*/  6,   /* SELECT */
+    /*[10] L     */  4,   /* V   */
+    /*[11] R     */  5,   /* VI  */
 };
 
 static unsigned pcfx_mask_from_canon(int canon)

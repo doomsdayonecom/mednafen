@@ -220,9 +220,12 @@ void FXINPUT_SetInput(unsigned port, const char *type, uint8 *ptr)
 
 #ifdef WANT_RRDC
 /* ---- Retro Remote Debug Controller: pad-button injection ---------------- *
- * data_ptr[0] is port 0's 2-byte pad buffer (little-endian; bit table in
- * input/gamepad.cpp: UP=0 DOWN=1 LEFT=2 RIGHT=3 SELECT=4 RUN=5 IV=6 V=7 VI=8
- * III=9 II=10 I=11). The frontend's Input_Update() rewrites that buffer from
+ * data_ptr[0] is port 0's 2-byte pad buffer (little-endian). The bit layout is
+ * the ORDER of PCFX_GamepadIDII in input/gamepad.cpp — git.cpp assigns
+ * BitOffset += BitSize as it walks that array, and the third IDIIS_Button
+ * argument is ConfigOrder, NOT a bit offset: I=0 II=1 III=2 IV=3 V=4 VI=5
+ * SELECT=6 RUN=7 UP=8 RIGHT=9 DOWN=10 LEFT=11.
+ * The frontend's Input_Update() rewrites that buffer from
  * physical input every frame, so injected buttons are kept in a persistent
  * mask that PCFX_ApplyInjectedButtons() OR-merges back in each frame, right
  * before the core reads the pad. Both run on the emulator thread. */
@@ -242,9 +245,9 @@ extern "C" int PCFX_InjectButton(unsigned bit, int action)   /* 0=tap 1=down 2=u
 
 /* 0.5: level-held virtual pad (RRDC /pad). Unlike the momentary /key inject
  * above, a pad mask persists until changed and is OR-merged every frame for a
- * connected pad — per port, so multi-pad tests work. Bits are the PC-FX buffer
- * layout (UP=0 DOWN=1 LEFT=2 RIGHT=3 SELECT=4 RUN=5 IV=6 V=7 VI=8 III=9 II=10
- * I=11); pcfx_control.cpp remaps the RRDC canonical mask onto it. */
+ * connected pad — per port, so multi-pad tests work. Bits are the PC-FX pad
+ * word (I=0 II=1 III=2 IV=3 V=4 VI=5 SELECT=6 RUN=7 UP=8 RIGHT=9 DOWN=10
+ * LEFT=11); pcfx_control.cpp remaps the RRDC canonical mask onto it. */
 static uint16 rrdc_pad_mask[TOTAL_PORTS]      = { 0 };
 static uint8  rrdc_pad_connected[TOTAL_PORTS] = { 0 };
 
