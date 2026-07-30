@@ -1280,6 +1280,9 @@ bool DebuggerFudge(void)
 // enabled by MEDNAFEN_CONTROLPORT. Harmless no-op when unset. Compiled in only
 // when configured with --enable-rrdc (WANT_RRDC); otherwise these hooks vanish.
 #ifdef WANT_RRDC
+// Per-platform HTTP control backends (src/control/). main.cpp is platform-
+// agnostic, so it dispatches to the backend matching the loaded module through a
+// small function-pointer table selected once in GameLoop (rrdc_select_backend).
 extern "C" void pcfx_control_init(void);
 extern "C" void pcfx_control_service(void);      // process a request (frame boundary)
 extern "C" int  pcfx_control_running(void);      // 0 => paused/stepped-out: don't advance
@@ -1287,12 +1290,43 @@ extern "C" void pcfx_control_on_frame(void);     // tick the /step budget
 extern "C" void pcfx_control_frame(const uint32_t *pixels, int w, int h, int pitch, const int32_t *line_widths, int rsh, int gsh, int bsh);
 extern "C" void pcfx_control_audio(const int16_t *samples, int frames, int channels, double rate);
 extern "C" void PCFX_ApplyInjectedButtons(void); // re-assert /key holds (pcfx/input.cpp)
+
+extern "C" void pce_control_init(void);
+extern "C" void pce_control_service(void);
+extern "C" int  pce_control_running(void);
+extern "C" void pce_control_on_frame(void);
+extern "C" void pce_control_frame(const uint32_t *pixels, int w, int h, int pitch, const int32_t *line_widths, int rsh, int gsh, int bsh);
+extern "C" void pce_control_audio(const int16_t *samples, int frames, int channels, double rate);
+
+// Selected from CurGame->shortname in GameLoop; defaults to the PC-FX backend.
+static void (*rrdc_init)(void)     = pcfx_control_init;
+static void (*rrdc_service)(void)  = pcfx_control_service;
+static int  (*rrdc_running)(void)  = pcfx_control_running;
+static void (*rrdc_on_frame)(void) = pcfx_control_on_frame;
+static void (*rrdc_frame)(const uint32_t *, int, int, int, const int32_t *, int, int, int) = pcfx_control_frame;
+static void (*rrdc_audio)(const int16_t *, int, int, double) = pcfx_control_audio;
+static void (*rrdc_apply_buttons)(void) = PCFX_ApplyInjectedButtons;
+
+static void rrdc_select_backend(void)
+{
+	if(CurGame && CurGame->shortname && !strcmp(CurGame->shortname, "pce"))
+	{
+		rrdc_init          = pce_control_init;
+		rrdc_service       = pce_control_service;
+		rrdc_running       = pce_control_running;
+		rrdc_on_frame      = pce_control_on_frame;
+		rrdc_frame         = pce_control_frame;
+		rrdc_audio         = pce_control_audio;
+		rrdc_apply_buttons = NULL;   // no pad injection wired for the PCE yet
+	}
+}
 #endif
 
 static int GameLoop(void *arg)
 {
 #ifdef WANT_RRDC
-	pcfx_control_init();
+	rrdc_select_backend();
+	rrdc_init();
 #endif
 	while(GameThreadRun)
 	{
@@ -1318,8 +1352,8 @@ static int GameLoop(void *arg)
 	 // RRDC: service one control request at this frame boundary (runs even when
 	 // paused, so /resume and /step get through), then gate advancing the
 	 // machine. When paused with no steps left, idle without emulating.
-	 pcfx_control_service();
-	 if(!pcfx_control_running())
+	 rrdc_service();
+	 if(!rrdc_running())
 	 {
 	  Time::SleepMS(2);
 	  continue;
@@ -1327,7 +1361,7 @@ static int GameLoop(void *arg)
 	 // Re-assert any /key-held pad buttons: Input_Update() rewrote the pad from
 	 // physical input after the previous frame, so OR them back in before the
 	 // core reads the pad in MDFNI_Emulate().
-	 PCFX_ApplyInjectedButtons();
+	 if(rrdc_apply_buttons) rrdc_apply_buttons();
 #endif
 
 	 if(MDFNDnetplay && !(NoWaiting & 0x2))	// TODO: Hacky, clean up.
@@ -1417,7 +1451,7 @@ static int GameLoop(void *arg)
 	  // core signals a uniform width via LineWidths[0] == ~0.
 	  const int32 *lw = (espec.LineWidths && espec.LineWidths[0] != (int32)~0)
 	                     ? espec.LineWidths + espec.DisplayRect.y : NULL;
-	  pcfx_control_frame((const uint32_t *)espec.surface->pixels
+	  rrdc_frame((const uint32_t *)espec.surface->pixels
 	                       + espec.DisplayRect.y * espec.surface->pitchinpix
 	                       + espec.DisplayRect.x,
 	                     espec.DisplayRect.w, espec.DisplayRect.h,
@@ -1463,8 +1497,8 @@ static int GameLoop(void *arg)
 #ifdef WANT_RRDC
 	 // RRDC: this emulated frame is complete — push its audio into the drain
 	 // ring and tick the /step budget (waking a blocked /step at zero).
-	 pcfx_control_audio(sound, ssize, CurGame->soundchan, espec.SoundRate);
-	 pcfx_control_on_frame();
+	 rrdc_audio(sound, ssize, CurGame->soundchan, espec.SoundRate);
+	 rrdc_on_frame();
 #endif
 	 //
 	 //
