@@ -1207,6 +1207,29 @@ static const CheatInfoStruct CheatInfo =
 
 using namespace MDFN_IEN_PCE;
 
+/* ---- Retro Remote Debug Controller accessors (src/control/pce_control.cpp) --
+ * Tiny extern "C" shims so the portable control backend can reach PCE state
+ * without pulling in Mednafen's C++ headers. BaseRAM/IsSGX are file statics
+ * above; HuCPU is in MDFN_IEN_PCE, in scope via the using-directive. Only
+ * compiled with --enable-rrdc (WANT_RRDC); nothing references them otherwise. */
+#ifdef WANT_RRDC
+extern "C" uint8_t *PCE_GetRAM(uint32_t *size_out)
+{
+    if(size_out) *size_out = IsSGX ? 32768u : 8192u;   /* 8 KB PCE, 32 KB SGX */
+    return (uint8_t *)BaseRAM;
+}
+extern "C" void PCE_GetRegs(uint32_t *out6)  /* [0]=pc [1]=a [2]=x [3]=y [4]=sp [5]=p */
+{
+    out6[0] = HuCPU.GetRegister(HuC6280::GSREG_PC);
+    out6[1] = HuCPU.GetRegister(HuC6280::GSREG_A);
+    out6[2] = HuCPU.GetRegister(HuC6280::GSREG_X);
+    out6[3] = HuCPU.GetRegister(HuC6280::GSREG_Y);
+    out6[4] = HuCPU.GetRegister(HuC6280::GSREG_SP);
+    out6[5] = HuCPU.GetRegister(HuC6280::GSREG_P);
+}
+extern "C" void PCE_ControlReset(void) { PCE_Power(); }
+#endif /* WANT_RRDC */
+
 MDFN_HIDE extern const MDFNGI EmulatedPCE =
 {
  "pce",
