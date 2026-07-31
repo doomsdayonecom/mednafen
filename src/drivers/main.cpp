@@ -1298,6 +1298,13 @@ extern "C" void pce_control_on_frame(void);
 extern "C" void pce_control_frame(const uint32_t *pixels, int w, int h, int pitch, const int32_t *line_widths, int rsh, int gsh, int bsh);
 extern "C" void pce_control_audio(const int16_t *samples, int frames, int channels, double rate);
 
+extern "C" void md_control_init(void);
+extern "C" void md_control_service(void);
+extern "C" int  md_control_running(void);
+extern "C" void md_control_on_frame(void);
+extern "C" void md_control_frame(const uint32_t *pixels, int w, int h, int pitch, const int32_t *line_widths, int rsh, int gsh, int bsh);
+extern "C" void md_control_audio(const int16_t *samples, int frames, int channels, double rate);
+
 // Selected from CurGame->shortname in GameLoop; defaults to the PC-FX backend.
 static void (*rrdc_init)(void)     = pcfx_control_init;
 static void (*rrdc_service)(void)  = pcfx_control_service;
@@ -1318,6 +1325,16 @@ static void rrdc_select_backend(void)
 		rrdc_frame         = pce_control_frame;
 		rrdc_audio         = pce_control_audio;
 		rrdc_apply_buttons = NULL;   // no pad injection wired for the PCE yet
+	}
+	else if(CurGame && CurGame->shortname && !strcmp(CurGame->shortname, "md"))
+	{
+		rrdc_init          = md_control_init;
+		rrdc_service       = md_control_service;
+		rrdc_running       = md_control_running;
+		rrdc_on_frame      = md_control_on_frame;
+		rrdc_frame         = md_control_frame;
+		rrdc_audio         = md_control_audio;
+		rrdc_apply_buttons = NULL;   // no pad injection wired for the MD yet
 	}
 }
 #endif

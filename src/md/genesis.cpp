@@ -126,4 +126,23 @@ void gen_bank_w(int state)
     zbank = ((zbank >> 1) | ((state & 1) << 23)) & 0xFF8000;
 }
 
+/* --- RRDC control accessors (see src/control/md_control.cpp) -------------- *
+ * extern "C" so the portable control backend can reach MD state without pulling
+ * in the MD headers; the same shape as PCFX_Get* in pcfx/pcfx.cpp. */
+extern "C" uint8_t *MD_GetRAM(uint32_t *size_out)
+{
+    if(size_out) *size_out = sizeof(work_ram);   /* 64 KB 68000 work RAM */
+    return work_ram;
+}
+
+extern "C" void MD_GetRegs(uint32_t *out)   /* [0]=pc [1]=sr [2..9]=d0-7 [10..17]=a0-7 */
+{
+    out[0] = Main68K.GetRegister(M68K::GSREG_PC);
+    out[1] = Main68K.GetRegister(M68K::GSREG_SR);
+    for(unsigned i = 0; i < 8; i++) out[2 + i]  = Main68K.GetRegister(M68K::GSREG_D0 + i);
+    for(unsigned i = 0; i < 8; i++) out[10 + i] = Main68K.GetRegister(M68K::GSREG_A0 + i);
+}
+
+extern "C" void MD_ControlReset(void) { gen_reset(true); }
+
 }
