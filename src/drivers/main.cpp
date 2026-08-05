@@ -1290,6 +1290,7 @@ extern "C" void pcfx_control_on_frame(void);     // tick the /step budget
 extern "C" void pcfx_control_frame(const uint32_t *pixels, int w, int h, int pitch, const int32_t *line_widths, int rsh, int gsh, int bsh);
 extern "C" void pcfx_control_audio(const int16_t *samples, int frames, int channels, double rate);
 extern "C" void PCFX_ApplyInjectedButtons(void); // re-assert /key holds (pcfx/input.cpp)
+extern "C" void PCE_ApplyInjectedButtons(void);  // OR-merge /pad holds (pce/input.cpp)
 
 extern "C" void pce_control_init(void);
 extern "C" void pce_control_service(void);
@@ -1324,7 +1325,7 @@ static void rrdc_select_backend(void)
 		rrdc_on_frame      = pce_control_on_frame;
 		rrdc_frame         = pce_control_frame;
 		rrdc_audio         = pce_control_audio;
-		rrdc_apply_buttons = NULL;   // no pad injection wired for the PCE yet
+		rrdc_apply_buttons = PCE_ApplyInjectedButtons;   // /pad injection (0.5)
 	}
 	else if(CurGame && CurGame->shortname && !strcmp(CurGame->shortname, "md"))
 	{

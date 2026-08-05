@@ -97,10 +97,62 @@ static void pce_reset(void) { PCE_ControlReset(); }
  * contract while those verbs answer 400. */
 static int pce_inject_key(int is_text, uint32_t value, int action)
 { (void)is_text; (void)value; (void)action; return 0; }
+/* 0.5: virtual game controller. RRDC speaks a fixed CANONICAL button mask
+ * (bit0 LEFT, 1 RIGHT, 2 UP, 3 DOWN, 4 A, 5 B, 6 X, 7 Y, 8 START, 9 SELECT,
+ * 10 L, 11 R). Map it onto the PCE pad word (I=0 II=1 SELECT=2 RUN=3 UP=4
+ * RIGHT=5 DOWN=6 LEFT=7 III=8 IV=9 V=10 VI=11 — see src/pce/input.cpp). The two
+ * face buttons and RUN/SELECT are the standard pad; III-VI are the Avenue 6. */
+extern "C" int PCE_SetPad(int index, unsigned buttons, int connected);
+extern "C" int PCE_GetPad(int index, unsigned *buttons, int *connected);
+
+static const int8_t pce_pad_from_canon[12] = {
+    /*[0]  LEFT  */  7,
+    /*[1]  RIGHT */  5,
+    /*[2]  UP    */  4,
+    /*[3]  DOWN  */  6,
+    /*[4]  A     */  0,   /* I   */
+    /*[5]  B     */  1,   /* II  */
+    /*[6]  X     */  8,   /* III */
+    /*[7]  Y     */  9,   /* IV  */
+    /*[8]  START */  3,   /* RUN */
+    /*[9]  SELECT*/  2,   /* SELECT */
+    /*[10] L     */ 10,   /* V   */
+    /*[11] R     */ 11,   /* VI  */
+};
+
+static unsigned pce_mask_from_canon(int canon)
+{
+    unsigned out = 0;
+    for (int b = 0; b < 12; b++)
+        if (canon & (1 << b)) out |= (1u << pce_pad_from_canon[b]);
+    return out;
+}
+
+static int pce_canon_from_mask(unsigned raw)
+{
+    int out = 0;
+    for (int b = 0; b < 12; b++)
+        if (raw & (1u << pce_pad_from_canon[b])) out |= (1 << b);
+    return out;
+}
+
 static int pce_set_pad(int index, int buttons, int connected)
-{ (void)index; (void)buttons; (void)connected; return 0; }
+{
+    unsigned cur = 0; int curconn = 0;
+    if (!PCE_GetPad(index, &cur, &curconn)) return 0;   /* bad index -> 400 */
+    unsigned mask = (buttons   < 0) ? cur     : pce_mask_from_canon(buttons);
+    int      conn = (connected < 0) ? curconn : connected;   /* -1 = leave */
+    return PCE_SetPad(index, mask, conn);
+}
+
 static int pce_get_pad(int index, int *buttons, int *connected)
-{ (void)index; (void)buttons; (void)connected; return 0; }
+{
+    unsigned raw = 0; int conn = 0;
+    if (!PCE_GetPad(index, &raw, &conn)) return 0;
+    if (buttons)   *buttons   = pce_canon_from_mask(raw);
+    if (connected) *connected = conn;
+    return 1;
+}
 static int pce_set_pointer(int absolute, int32_t x, int32_t y, int buttons)
 { (void)absolute; (void)x; (void)y; (void)buttons; return 0; }
 static int pce_get_pointer(int32_t *x, int32_t *y, int *buttons)

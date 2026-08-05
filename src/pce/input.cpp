@@ -181,6 +181,45 @@ void INPUT_Frame(void)
    devices[i]->Update(data_ptr[i]);
 }
 
+#ifdef WANT_RRDC
+/* ---- Retro Remote Debug Controller: pad-button injection (mirrors pcfx) ----
+ * data_ptr[port] is that port's 2-byte gamepad buffer (little-endian). The bit
+ * layout is the ORDER of PCE_GamepadIDII in input/gamepad.cpp — the third
+ * IDIIS_Button argument is ConfigOrder, NOT a bit offset: I=0 II=1 SELECT=2
+ * RUN=3 UP=4 RIGHT=5 DOWN=6 LEFT=7 III=8 IV=9 V=10 VI=11. INPUT_Frame() rewrites
+ * the buffer from physical input every frame, so a persistent /pad mask is
+ * OR-merged back each frame by PCE_ApplyInjectedButtons(), right before the core
+ * reads the pad. pce_control.cpp remaps the RRDC canonical mask onto this. */
+static uint16 rrdc_pad_mask[5]      = { 0 };
+static uint8  rrdc_pad_connected[5] = { 0 };
+
+extern "C" int PCE_SetPad(int index, unsigned buttons, int connected)
+{
+ if(index < 0 || index >= 5) return 0;
+ rrdc_pad_mask[index]      = (uint16)buttons;
+ rrdc_pad_connected[index] = connected ? 1 : 0;
+ return 1;
+}
+
+extern "C" int PCE_GetPad(int index, unsigned *buttons, int *connected)
+{
+ if(index < 0 || index >= 5) return 0;
+ if(buttons)   *buttons   = rrdc_pad_mask[index];
+ if(connected) *connected = rrdc_pad_connected[index];
+ return 1;
+}
+
+extern "C" void PCE_ApplyInjectedButtons(void)
+{
+ for(int i = 0; i < 5; i++) {
+  if(!rrdc_pad_connected[i]) continue;
+  uint8 *pp = (uint8 *)data_ptr[i];
+  if(pp) { pp[0] |= (uint8)(rrdc_pad_mask[i] & 0xFF);
+           pp[1] |= (uint8)(rrdc_pad_mask[i] >> 8); }
+ }
+}
+#endif /* WANT_RRDC */
+
 void INPUT_AdjustTS(int32 delta_timestamp)
 {
  for(int i = 0; i < 5; i++)
