@@ -997,6 +997,69 @@ static MDFN_COLD void Cleanup(void)
  cdifs = NULL;
 }
 
+//
+// RRDC accessors. Kept here rather than in src/control/ss_control.cpp because
+// the work RAM arrays are uint16 with big-endian byte order imposed by the
+// ne16_* helpers — a raw byte index into them is wrong on a little-endian
+// host, and getting that swizzle right is exactly what these helpers are for.
+//
+extern "C" uint32_t SS_ControlReadMem(uint32_t addr, uint32_t len, uint8_t* out)
+{
+ uint32_t n = 0;
+
+ for(; n < len; n++)
+ {
+  // Accept the cached and uncached views of the same memory; a Saturn program
+  // reaches hardware through 0x2xxxxxxx and RAM through either.
+  const uint32_t A = (addr + n) & 0x0FFFFFFF;
+
+  if(A >= 0x00200000 && A <= 0x003FFFFF)
+   out[n] = ne16_rbo_be<uint8>(WorkRAML, A & 0xFFFFF);
+  else if(A >= 0x06000000 && A <= 0x07FFFFFF)
+   out[n] = ne16_rbo_be<uint8>(WorkRAMH, A & 0xFFFFF);
+  else if(A <= 0x000FFFFF)
+   out[n] = ne16_rbo_be<uint8>(BIOSROM, A & 0x7FFFF);
+  else
+   break;                                  // unmapped: a short read, not a lie
+ }
+
+ return n;
+}
+
+extern "C" uint32_t SS_ControlWriteMem(uint32_t addr, uint32_t len, const uint8_t* in)
+{
+ uint32_t n = 0;
+
+ for(; n < len; n++)
+ {
+  const uint32_t A = (addr + n) & 0x0FFFFFFF;
+
+  if(A >= 0x00200000 && A <= 0x003FFFFF)
+   ne16_wbo_be<uint8>(WorkRAML, A & 0xFFFFF, in[n]);
+  else if(A >= 0x06000000 && A <= 0x07FFFFFF)
+   ne16_wbo_be<uint8>(WorkRAMH, A & 0xFFFFF, in[n]);
+  else
+   break;                                  // BIOS and hardware are not pokeable
+ }
+
+ return n;
+}
+
+// [0] = master SH-2 PC, [1..16] = R0..R15. The slave is not exposed: this
+// floor runs the master only, and a second set of registers in the same JSON
+// would invite reading the wrong one.
+extern "C" void SS_ControlGetRegs(uint32_t* out17)
+{
+ out17[0] = CPU[0].PC;
+ for(unsigned i = 0; i < 16; i++)
+  out17[1 + i] = CPU[0].R[i];
+}
+
+extern "C" void SS_ControlReset(void)
+{
+ MDFNI_Reset();
+}
+
 static MDFN_COLD bool IsSaturnDisc(const uint8* sa32k)
 {
  if(sha256(&sa32k[0x100], 0xD00) != "96b8ea48819cfa589f24c40aa149c224c420dccf38b730f00156efe25c9bbc8f"_sha256)
@@ -1384,6 +1447,7 @@ static void MDFN_COLD InitCommon(unsigned cpucache_emumode, unsigned horrible_ha
  SS_SetPhysMemMap(0x06000000, 0x07FFFFFF, WorkRAMH, sizeof(WorkRAMH), true);
  MDFNMP_RegSearchable(0x00200000, sizeof(WorkRAML));
  MDFNMP_RegSearchable(0x06000000, sizeof(WorkRAMH));
+
 
  {
   std::unique_ptr<FileStream> cart_rom_stream;
