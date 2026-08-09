@@ -254,6 +254,20 @@ static SFORMAT Joy_StateRegs[] =
  SFEND
 };
 
+#ifdef WANT_RRDC
+/* Retro Remote Debug Controller /pad: a level-held virtual pad mask, OR-merged
+ * into the joypad sample in Emulate() right where the core reads it — the same
+ * point the frontend-supplied buffer lands, so injection works headless with
+ * no SDL input at all. Bits are the pad word as sampled into padbufblah, which
+ * is ACTIVE-HIGH here (the IDII order in this file: A=0 B=1 SELECT=2 START=3
+ * RIGHT=4 LEFT=5 UP=6 DOWN=7 R=8 L=9 — the hardware KEYINPUT layout); the core
+ * derives the guest-visible ACTIVE-LOW KEYINPUT itself (P1 = 0x03FF ^ joy).
+ * gba_control.cpp remaps the RRDC canonical mask onto these bits. The GBA has
+ * one built-in pad, so only index 0 exists. */
+static uint16 rrdc_pad_mask = 0;
+static uint8  rrdc_pad_connected = 0;
+#endif
+
 static void RecalcWaits(uint16 value);
 
 static void StateAction(StateMem *sm, const unsigned load, const bool data_only)
@@ -3229,6 +3243,11 @@ static void Emulate(EmulateSpecStruct *espec)
 
  padbufblah = padq[0] | (padq[1] << 8);
 
+#ifdef WANT_RRDC
+ if(rrdc_pad_connected)
+  padbufblah |= rrdc_pad_mask;   /* /pad holds, active-high pre-inversion */
+#endif
+
  frameready = 0;
 
  HelloSkipper = espec->skip;
@@ -3333,6 +3352,60 @@ static const CustomPalette_Spec CPInfo[] =
 
  { NULL, NULL }
 };
+
+#ifdef WANT_RRDC
+/* --- RRDC control accessors (see src/control/gba_control.cpp) ------------- *
+ * extern "C" so the portable control backend can reach GBA state without
+ * pulling in the GBA headers; the same shape as MD_Get* in md/genesis.cpp.
+ * The accessors hand back the arrays behind the bus regions the backend
+ * serves: workRAM is EWRAM (bus 0x02000000, 256 KB), internalRAM is IWRAM
+ * (bus 0x03000000, 32 KB) and ioMem is the I/O register block (bus
+ * 0x04000000, 1 KB, read-only through /mem — KEYINPUT etc. as the core last
+ * latched them) — see CPUReadByte's address decoding above. */
+extern "C" uint8_t *GBA_GetEWRAM(uint32_t *size_out)
+{
+ if(size_out) *size_out = 0x40000;
+ return workRAM;
+}
+
+extern "C" uint8_t *GBA_GetIWRAM(uint32_t *size_out)
+{
+ if(size_out) *size_out = 0x8000;
+ return internalRAM;
+}
+
+extern "C" uint8_t *GBA_GetIOMEM(uint32_t *size_out)
+{
+ if(size_out) *size_out = 0x400;
+ return ioMem;
+}
+
+extern "C" void GBA_GetRegs(uint32_t *out)   /* [0]=pc [1]=cpsr [2..17]=r0-r15 */
+{
+ CPUUpdateCPSR();                            /* fold live flags into reg[16] */
+ out[0] = armNextPC;                         /* next instruction to execute  */
+ out[1] = reg[16].I;
+ for(unsigned i = 0; i < 16; i++) out[2 + i] = reg[i].I;
+}
+
+extern "C" void GBA_ControlReset(void) { CPUReset(); }
+
+extern "C" int GBA_SetPad(int index, unsigned buttons, int connected)
+{
+ if(index != 0) return 0;                    /* one built-in pad */
+ rrdc_pad_mask      = (uint16)buttons;
+ rrdc_pad_connected = connected ? 1 : 0;
+ return 1;
+}
+
+extern "C" int GBA_GetPad(int index, unsigned *buttons, int *connected)
+{
+ if(index != 0) return 0;
+ if(buttons)   *buttons   = rrdc_pad_mask;
+ if(connected) *connected = rrdc_pad_connected;
+ return 1;
+}
+#endif /* WANT_RRDC */
 
 }
 

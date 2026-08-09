@@ -1404,6 +1404,36 @@ static const CheatInfoStruct CheatInfo =
  false
 };
 
+#ifdef WANT_RRDC
+/* --- RRDC control accessors (see src/control/snes_control.cpp) ------------ *
+ * extern "C" so the portable control backend can reach snes_faust state
+ * without pulling in its headers; the same shape as MD_Get* in md/genesis.cpp.
+ * Core65816.h carries the GSREG ids and is designed to be included inside the
+ * namespace (as debug.cpp does). */
+#include "Core65816.h"
+
+extern "C" uint8_t *SNES_GetWRAM(uint32_t *size_out)
+{
+ if(size_out) *size_out = sizeof(WRAM);      /* 128 KB at bus $7E0000 */
+ return WRAM;
+}
+
+extern "C" void SNES_GetRegs(uint32_t *out)  /* [0]=pc(pbr:pc) [1]=dbr [2]=s [3]=d [4]=a [5]=x [6]=y [7]=p [8]=e */
+{
+ out[0] = CPU_GetRegister(Core65816::GSREG_PCPBR);
+ out[1] = CPU_GetRegister(Core65816::GSREG_DBR);
+ out[2] = CPU_GetRegister(Core65816::GSREG_S);
+ out[3] = CPU_GetRegister(Core65816::GSREG_D);
+ out[4] = CPU_GetRegister(Core65816::GSREG_A);
+ out[5] = CPU_GetRegister(Core65816::GSREG_X);
+ out[6] = CPU_GetRegister(Core65816::GSREG_Y);
+ out[7] = CPU_GetRegister(Core65816::GSREG_P);
+ out[8] = CPU_GetRegister(Core65816::GSREG_E);
+}
+
+extern "C" void SNES_ControlReset(void) { Reset(true); }
+#endif /* WANT_RRDC */
+
 }
 
 using namespace MDFN_IEN_SNES_FAUST;
