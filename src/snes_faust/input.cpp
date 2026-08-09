@@ -325,10 +325,46 @@ void INPUT_StateAction(StateMem* sm, const unsigned load, const bool data_only)
  }
 }
 
+#ifdef WANT_RRDC
+/* ---- Retro Remote Debug Controller: level-held virtual pad (/pad) -------- *
+ * A pad mask persists until changed and is OR-merged into the frontend's pad
+ * buffer right before each device consumes it below — the real read path that
+ * feeds both the $4016/$4017 serial reads and the auto-read JOY1L/H, no SDL
+ * (headless CI has no joystick, which is what this exists for). Bits are
+ * snes_faust's gamepad data word — the IDII order in input/gamepad.cpp: B=0
+ * Y=1 SELECT=2 START=3 UP=4 DOWN=5 LEFT=6 RIGHT=7 A=8 X=9 L=10 R=11 (the
+ * controller's own serial shift order); snes_control.cpp remaps the RRDC
+ * canonical mask onto it. Per virtual port, so multi-pad tests work. */
+static uint16 rrdc_pad_mask[8]      = { 0 };
+static uint8  rrdc_pad_connected[8] = { 0 };
+
+extern "C" int SNES_SetPad(int index, unsigned buttons, int connected)
+{
+ if(index < 0 || index >= 8) return 0;
+ rrdc_pad_mask[index]      = (uint16)buttons;
+ rrdc_pad_connected[index] = connected ? 1 : 0;
+ return 1;
+}
+
+extern "C" int SNES_GetPad(int index, unsigned *buttons, int *connected)
+{
+ if(index < 0 || index >= 8) return 0;
+ if(buttons)   *buttons   = rrdc_pad_mask[index];
+ if(connected) *connected = rrdc_pad_connected[index];
+ return 1;
+}
+#endif /* WANT_RRDC */
+
 void INPUT_UpdatePhysicalState(void)
 {
  for(unsigned vport = 0; vport < 8; vport++)
+ {
+#ifdef WANT_RRDC
+  if(rrdc_pad_connected[vport] && DeviceData[vport])
+   MDFN_en16lsb(DeviceData[vport], MDFN_de16lsb(DeviceData[vport]) | rrdc_pad_mask[vport]);
+#endif
   Devices[vport]->UpdatePhysicalState(DeviceData[vport]);
+ }
 }
 
 static const std::vector<InputDeviceInfoStruct> InputDeviceInfo =

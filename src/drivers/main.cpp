@@ -1305,6 +1305,20 @@ extern "C" void md_control_on_frame(void);
 extern "C" void md_control_frame(const uint32_t *pixels, int w, int h, int pitch, const int32_t *line_widths, int rsh, int gsh, int bsh);
 extern "C" void md_control_audio(const int16_t *samples, int frames, int channels, double rate);
 
+extern "C" void gba_control_init(void);
+extern "C" void gba_control_service(void);
+extern "C" int  gba_control_running(void);
+extern "C" void gba_control_on_frame(void);
+extern "C" void gba_control_frame(const uint32_t *pixels, int w, int h, int pitch, const int32_t *line_widths, int rsh, int gsh, int bsh);
+extern "C" void gba_control_audio(const int16_t *samples, int frames, int channels, double rate);
+
+extern "C" void snes_control_init(void);
+extern "C" void snes_control_service(void);
+extern "C" int  snes_control_running(void);
+extern "C" void snes_control_on_frame(void);
+extern "C" void snes_control_frame(const uint32_t *pixels, int w, int h, int pitch, const int32_t *line_widths, int rsh, int gsh, int bsh);
+extern "C" void snes_control_audio(const int16_t *samples, int frames, int channels, double rate);
+
 // Selected from CurGame->shortname in GameLoop; defaults to the PC-FX backend.
 static void (*rrdc_init)(void)     = pcfx_control_init;
 static void (*rrdc_service)(void)  = pcfx_control_service;
@@ -1335,6 +1349,26 @@ static void rrdc_select_backend(void)
 		rrdc_frame         = md_control_frame;
 		rrdc_audio         = md_control_audio;
 		rrdc_apply_buttons = NULL;   // no pad injection wired for the MD yet
+	}
+	else if(CurGame && CurGame->shortname && !strcmp(CurGame->shortname, "gba"))
+	{
+		rrdc_init          = gba_control_init;
+		rrdc_service       = gba_control_service;
+		rrdc_running       = gba_control_running;
+		rrdc_on_frame      = gba_control_on_frame;
+		rrdc_frame         = gba_control_frame;
+		rrdc_audio         = gba_control_audio;
+		rrdc_apply_buttons = NULL;   // /pad merges core-side in gba/GBA.cpp
+	}
+	else if(CurGame && CurGame->shortname && !strcmp(CurGame->shortname, "snes_faust"))
+	{
+		rrdc_init          = snes_control_init;
+		rrdc_service       = snes_control_service;
+		rrdc_running       = snes_control_running;
+		rrdc_on_frame      = snes_control_on_frame;
+		rrdc_frame         = snes_control_frame;
+		rrdc_audio         = snes_control_audio;
+		rrdc_apply_buttons = NULL;   // /pad merges core-side in snes_faust/input.cpp
 	}
 }
 #endif
