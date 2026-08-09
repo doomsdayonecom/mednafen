@@ -1312,6 +1312,13 @@ extern "C" void gba_control_on_frame(void);
 extern "C" void gba_control_frame(const uint32_t *pixels, int w, int h, int pitch, const int32_t *line_widths, int rsh, int gsh, int bsh);
 extern "C" void gba_control_audio(const int16_t *samples, int frames, int channels, double rate);
 
+extern "C" void ss_control_init(void);
+extern "C" void ss_control_service(void);
+extern "C" int  ss_control_running(void);
+extern "C" void ss_control_on_frame(void);
+extern "C" void ss_control_frame(const uint32_t *pixels, int w, int h, int pitch, const int32_t *line_widths, int rsh, int gsh, int bsh);
+extern "C" void ss_control_audio(const int16_t *samples, int frames, int channels, double rate);
+
 extern "C" void snes_control_init(void);
 extern "C" void snes_control_service(void);
 extern "C" int  snes_control_running(void);
@@ -1359,6 +1366,16 @@ static void rrdc_select_backend(void)
 		rrdc_frame         = gba_control_frame;
 		rrdc_audio         = gba_control_audio;
 		rrdc_apply_buttons = NULL;   // /pad merges core-side in gba/GBA.cpp
+	}
+	else if(CurGame && CurGame->shortname && !strcmp(CurGame->shortname, "ss"))
+	{
+		rrdc_init          = ss_control_init;
+		rrdc_service       = ss_control_service;
+		rrdc_running       = ss_control_running;
+		rrdc_on_frame      = ss_control_on_frame;
+		rrdc_frame         = ss_control_frame;
+		rrdc_audio         = ss_control_audio;
+		rrdc_apply_buttons = NULL;   // SMPC pad injection not wired yet
 	}
 	else if(CurGame && CurGame->shortname && !strcmp(CurGame->shortname, "snes_faust"))
 	{
