@@ -292,18 +292,31 @@ extern "C" void ss_control_on_frame(void) { retro_control_on_frame(); }
 extern "C" void ss_control_frame(const uint32_t *pixels, int w, int h, int pitch,
                                    const int32_t *line_widths, int rsh, int gsh, int bsh)
 {
-    if (pixels && w > 0 && h > 0) {
+    /* THE SATURN ALWAYS REPORTS DisplayRect.w == 0.
+     *
+     * Its renderer sets the width to zero and publishes the TRUE width of each
+     * line in LineWidths[] (src/ss/vdp2_render.cpp), because the hardware can
+     * change horizontal resolution per line. That is not the PC-FX's
+     * "DisplayRect.w is usually right, per-line widths refine it" — here there
+     * is no frame width at all.
+     *
+     * The PC-FX backend this was derived from guards on `w > 0`, so ported
+     * unchanged it dropped EVERY Saturn frame and reported a 0x0 framebuffer.
+     * That looked exactly like "the program never put anything on screen", and
+     * cost an evening of debugging VDP2 registers that were fine. So: the
+     * frame width is the widest line, and `w` is only a fallback for a line
+     * whose own width is missing. */
+    int W = 0;
+    for (int y = 0; y < h && line_widths; y++)
+        if ((int)line_widths[y] > W) W = (int)line_widths[y];
+    if (W <= 0) W = w;
+
+    if (pixels && W > 0 && h > 0) {
         if (h > FB_MAX_H) h = FB_MAX_H;
-        /* output width = widest true line width this frame, capped to the buffer */
-        int W = w;
-        for (int y = 0; y < h; y++) {
-            int lw = line_widths ? (int)line_widths[y] : w;
-            if (lw > W) W = lw;
-        }
         if (W > FB_MAX_W) W = FB_MAX_W;
         for (int y = 0; y < h; y++) {
-            int lw = line_widths ? (int)line_widths[y] : w;
-            if (lw <= 0) lw = w;                       /* blank/border line */
+            int lw = line_widths ? (int)line_widths[y] : W;
+            if (lw <= 0) lw = W;                       /* blank/border line */
             const uint32_t *row = &pixels[(size_t)y * pitch];
             uint8_t *o = &g_fb[(size_t)y * W * 3];
             for (int x = 0; x < W; x++) {
