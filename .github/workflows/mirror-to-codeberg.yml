@@ -21,6 +21,23 @@ jobs:
     # runs-on: ubuntu-latest   # GitHub-hosted — restore when org Actions minutes return
     runs-on: [self-hosted, doomsdayonecom]   # org self-hosted runners (GH-hosted minutes exhausted)
     steps:
+      # Self-hosted runners reuse their workspace, and a job that ran as root
+      # can leave files the runner user cannot delete -- which makes the NEXT
+      # checkout fail with EACCES, on a branch that never went near CI.
+      #
+      # Take ownership of the whole workspace rather than deleting the paths we
+      # know about: cleaning .git/refs/remotes/mirror is not enough, the same
+      # rubbish also sits in .git/logs/refs/remotes/mirror, and there is no
+      # reason to think that is the last of it.
+      - name: 🧹 Take ownership of the workspace (self-hosted)
+        run: |
+          if [ -d "${GITHUB_WORKSPACE}" ] && [ -n "$(find "${GITHUB_WORKSPACE}" ! -user "$(id -u)" -print -quit 2>/dev/null)" ]; then
+            docker run --rm -v "${GITHUB_WORKSPACE}:/w" alpine:3 \
+              chown -R "$(id -u):$(id -g)" /w || true
+            echo "took ownership of ${GITHUB_WORKSPACE}"
+          fi
+        continue-on-error: true
+
       - name: 📦 Checkout (full history + all refs)
         uses: actions/checkout@v7
         with:
@@ -31,3 +48,19 @@ jobs:
         with:
           target_repo_url: ssh://git@codeberg.org/doomsdayonecom/mednafen.git
           ssh_private_key: ${{ secrets.CODEBERG_SSH_KEY }}
+
+      # The step above is a DOCKER CONTAINER action, so on a self-hosted runner
+      # it executes as root and leaves root-owned refs in the persistent
+      # workspace. github-runner has no passwordless sudo, so it cannot clear
+      # them, and the next job to land on that runner dies in actions/checkout
+      # with EACCES -- on whatever branch happened to be next, which makes it
+      # look like a random build failure rather than a mirroring problem.
+      #
+      # Hand ownership back using the one thing already running as root.
+      # always(), so a failed mirror still cleans up instead of poisoning the
+      # runner for every other workflow in this repo.
+      - name: 🧹 Return workspace ownership to the runner
+        if: always()
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/w" \
+            --entrypoint chown alpine:3 -R "$(id -u):$(id -g)" /w
